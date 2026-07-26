@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "dev": "replace-with-ptracker-dev-project-id",
+    "prod": "replace-with-ptracker-prod-project-id"
+  }
+}
+

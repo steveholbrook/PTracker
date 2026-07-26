@@ -1,0 +1,268 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSystemAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.systemRole == "ADMIN";
+    }
+
+    function memberPath(projectId) {
+      return /databases/$(database)/documents/projects/$(projectId)/members/$(request.auth.uid);
+    }
+
+    function isMember(projectId) {
+      return signedIn() && exists(memberPath(projectId));
+    }
+
+    function projectRole(projectId) {
+      return get(memberPath(projectId)).data.role;
+    }
+
+    function hasRole(projectId, allowed) {
+      return isMember(projectId) && projectRole(projectId) in allowed;
+    }
+
+    function isProjectAdmin(projectId) {
+      return hasRole(projectId, ["ADMIN"]);
+    }
+
+    function canEditSettings(projectId) {
+      return hasRole(projectId, ["ADMIN", "PROJECT_MANAGER"]);
+    }
+
+    function canEditPoap(projectId) {
+      return hasRole(projectId, ["ADMIN", "PROJECT_MANAGER", "DELIVERY_LEAD"]);
+    }
+
+    function canEditActuals(projectId) {
+      return hasRole(projectId, ["ADMIN", "PROJECT_MANAGER"]);
+    }
+
+    function canInvoice(projectId) {
+      return hasRole(projectId, ["ADMIN", "PROJECT_MANAGER", "FINANCE_REVIEWER"]);
+    }
+
+    function canFinanceApprove(projectId) {
+      return hasRole(projectId, ["ADMIN", "FINANCE_REVIEWER"]);
+    }
+
+    function canReadInternal(projectId) {
+      return hasRole(projectId, [
+        "ADMIN",
+        "PROJECT_MANAGER",
+        "DELIVERY_LEAD",
+        "FINANCE_REVIEWER",
+        "INTERNAL_VIEWER"
+      ]);
+    }
+
+    function hasLock(data) {
+      return data.keys().hasAny(["lockedByInvoiceId"])
+        && data.lockedByInvoiceId is string;
+    }
+
+    function validNewInvoiceLock(projectId) {
+      return !hasLock(resource.data)
+        && hasLock(request.resource.data)
+        && existsAfter(
+          /databases/$(database)/documents/projects/$(projectId)/invoices/$(request.resource.data.lockedByInvoiceId)
+        )
+        && getAfter(
+          /databases/$(database)/documents/projects/$(projectId)/invoices/$(request.resource.data.lockedByInvoiceId)
+        ).data.code == request.resource.data.code
+        && request.resource.data.week >= getAfter(
+          /databases/$(database)/documents/projects/$(projectId)/invoices/$(request.resource.data.lockedByInvoiceId)
+        ).data.startWeek
+        && request.resource.data.week <= getAfter(
+          /databases/$(database)/documents/projects/$(projectId)/invoices/$(request.resource.data.lockedByInvoiceId)
+        ).data.endWeek;
+    }
+
+    function validInvoiceUnlock(projectId) {
+      return hasLock(resource.data)
+        && !hasLock(request.resource.data)
+        && !existsAfter(
+          /databases/$(database)/documents/projects/$(projectId)/invoices/$(resource.data.lockedByInvoiceId)
+        );
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isSystemAdmin());
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && !request.resource.data.keys().hasAny(["systemRole"]);
+      allow update: if isSystemAdmin()
+        || (
+          signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.systemRole == resource.data.systemRole
+        );
+      allow delete: if false;
+    }
+
+    match /projectRegistry/{projectId} {
+      allow read: if isSystemAdmin();
+      allow create: if isSystemAdmin();
+      allow update: if isProjectAdmin(projectId) || isSystemAdmin();
+      allow delete: if false;
+    }
+
+    match /projects/{projectId} {
+      allow read: if isMember(projectId) || isSystemAdmin();
+      allow create: if isSystemAdmin();
+      allow update: if isProjectAdmin(projectId) || isSystemAdmin();
+      allow delete: if false;
+
+      match /members/{memberId} {
+        allow read: if signedIn()
+          && (
+            request.auth.uid == memberId
+            || resource.data.userId == request.auth.uid
+            || isProjectAdmin(projectId)
+            || isSystemAdmin()
+          );
+        allow create, update: if isProjectAdmin(projectId) || isSystemAdmin();
+        allow delete: if (isProjectAdmin(projectId) || isSystemAdmin())
+          && memberId != request.auth.uid;
+      }
+
+      match /settings/{settingsId} {
+        allow read: if isMember(projectId);
+        allow create, update: if canEditSettings(projectId);
+        allow delete: if false;
+      }
+
+      match /poapWorkstreams/{documentId} {
+        allow read: if isMember(projectId);
+        allow create, update, delete: if canEditPoap(projectId);
+      }
+
+      match /poapActivities/{documentId} {
+        allow read: if isMember(projectId);
+        allow create, update, delete: if canEditPoap(projectId);
+      }
+
+      match /poapDependencies/{documentId} {
+        allow read: if isMember(projectId);
+        allow create, update, delete: if canEditPoap(projectId);
+      }
+
+      match /poapBaselines/{documentId} {
+        allow read: if isMember(projectId);
+        allow create: if canEditPoap(projectId);
+        allow update: if canEditPoap(projectId)
+          && resource.data.approvalStatus != "APPROVED";
+        allow delete: if false;
+      }
+
+      match /poapHistory/{documentId} {
+        allow read: if isMember(projectId);
+        allow create: if canEditPoap(projectId);
+        allow update, delete: if false;
+      }
+
+      match /forecastBaselines/{baselineId} {
+        allow read: if canReadInternal(projectId);
+        allow create: if canEditSettings(projectId);
+        allow update, delete: if canEditSettings(projectId)
+          && resource.data.status != "APPROVED";
+      }
+
+      match /forecastLines/{lineId} {
+        allow read: if canReadInternal(projectId);
+        allow create: if canEditSettings(projectId);
+        allow update, delete: if canEditSettings(projectId)
+          && exists(
+            /databases/$(database)/documents/projects/$(projectId)/forecastBaselines/$(resource.data.baselineId)
+          )
+          && get(
+            /databases/$(database)/documents/projects/$(projectId)/forecastBaselines/$(resource.data.baselineId)
+          ).data.status != "APPROVED";
+      }
+
+      match /actualResources/{documentId} {
+        allow read: if canReadInternal(projectId);
+        allow create, update, delete: if canEditActuals(projectId);
+      }
+
+      match /actualEntries/{documentId} {
+        allow read: if canReadInternal(projectId);
+        allow create: if canEditActuals(projectId) && !hasLock(request.resource.data);
+        allow update: if (
+            canEditActuals(projectId)
+            && !hasLock(resource.data)
+            && !hasLock(request.resource.data)
+          )
+          || (
+            canInvoice(projectId)
+            && (
+              validNewInvoiceLock(projectId)
+              || validInvoiceUnlock(projectId)
+              || request.resource.data == resource.data
+            )
+          );
+        allow delete: if canEditActuals(projectId) && !hasLock(resource.data);
+      }
+
+      match /fiUploads/{documentId} {
+        allow read: if canReadInternal(projectId);
+        allow create: if canEditActuals(projectId);
+        allow update, delete: if false;
+      }
+
+      match /purchaseOrders/{documentId} {
+        allow read: if canReadInternal(projectId);
+        allow create, update: if isProjectAdmin(projectId);
+        allow delete: if false;
+      }
+
+      match /invoices/{invoiceId} {
+        allow read: if canReadInternal(projectId);
+        allow create: if canInvoice(projectId);
+        allow update: if !(resource.data.status in ["SENT_TO_CUSTOMER", "PAID"])
+          && (
+            canFinanceApprove(projectId)
+            || (
+              hasRole(projectId, ["PROJECT_MANAGER"])
+              && request.resource.data.status in ["DRAFT", "PM_REVIEWED"]
+            )
+          );
+        allow delete: if canInvoice(projectId)
+          && resource.data.status == "DRAFT";
+      }
+
+      match /creditNotes/{documentId} {
+        allow read: if canReadInternal(projectId);
+        allow create: if canInvoice(projectId)
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() > 0;
+        allow update, delete: if false;
+      }
+
+      match /auditLog/{auditId} {
+        allow read: if hasRole(projectId, ["ADMIN", "FINANCE_REVIEWER"]);
+        allow create: if isMember(projectId)
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.projectId == projectId;
+        allow update, delete: if false;
+      }
+
+      match /reportHistory/{reportId} {
+        allow read: if isMember(projectId);
+        allow create: if isMember(projectId)
+          && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

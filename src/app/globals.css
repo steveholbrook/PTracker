@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f3f6fa;
+  --foreground: #172033;
+  --navy: #0b1f3a;
+  --navy-light: #17385f;
+  --cyan: #0e91a1;
+  --blue: #2874d0;
+  --border: #d9e1eb;
+  --muted: #64748b;
+  --surface: #ffffff;
+  --success: #16875f;
+  --warning: #c27900;
+  --danger: #c43d4f;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-brand-navy: var(--navy);
+  --color-brand-cyan: var(--cyan);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: #b9e8ed;
+}
+
+.surface {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 5px 18px rgb(15 31 58 / 5%);
+}
+
+.subtle-grid {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 4%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 4%) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.scrollbar-thin {
+  scrollbar-color: #aab8ca transparent;
+  scrollbar-width: thin;
+}
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block;
+  }
+
+  body {
+    background: white;
+  }
+}

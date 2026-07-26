@@ -1,0 +1,88 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function member(projectId) {
+      return signedIn()
+        && firestore.exists(
+          /databases/(default)/documents/projects/$(projectId)/members/$(request.auth.uid)
+        );
+    }
+
+    function role(projectId) {
+      return firestore.get(
+        /databases/(default)/documents/projects/$(projectId)/members/$(request.auth.uid)
+      ).data.role;
+    }
+
+    function hasRole(projectId, roles) {
+      return member(projectId) && role(projectId) in roles;
+    }
+
+    function validUpload() {
+      return request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches(
+          '(application/.*|text/csv|image/png|image/jpeg)'
+        );
+    }
+
+    match /projects/{projectId}/forecast/{fileName} {
+      allow read: if hasRole(projectId, [
+        "ADMIN",
+        "PROJECT_MANAGER",
+        "FINANCE_REVIEWER",
+        "INTERNAL_VIEWER"
+      ]);
+      allow write: if hasRole(projectId, ["ADMIN", "PROJECT_MANAGER"])
+        && validUpload();
+    }
+
+    match /projects/{projectId}/actuals/{fileName} {
+      allow read: if hasRole(projectId, [
+        "ADMIN",
+        "PROJECT_MANAGER",
+        "FINANCE_REVIEWER",
+        "INTERNAL_VIEWER"
+      ]);
+      allow write: if hasRole(projectId, ["ADMIN", "PROJECT_MANAGER"])
+        && validUpload();
+    }
+
+    match /projects/{projectId}/reports/customer/{fileName} {
+      allow read: if member(projectId);
+      allow write: if hasRole(projectId, [
+        "ADMIN",
+        "PROJECT_MANAGER",
+        "FINANCE_REVIEWER"
+      ]) && validUpload();
+    }
+
+    match /projects/{projectId}/reports/internal/{fileName} {
+      allow read: if hasRole(projectId, [
+        "ADMIN",
+        "PROJECT_MANAGER",
+        "DELIVERY_LEAD",
+        "FINANCE_REVIEWER",
+        "INTERNAL_VIEWER"
+      ]);
+      allow write: if hasRole(projectId, [
+        "ADMIN",
+        "PROJECT_MANAGER",
+        "FINANCE_REVIEWER"
+      ]) && validUpload();
+    }
+
+    match /projects/{projectId}/backups/{fileName} {
+      allow read, write: if hasRole(projectId, ["ADMIN"]) && validUpload();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
