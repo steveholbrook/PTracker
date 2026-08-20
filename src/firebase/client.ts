@@ -3,6 +3,7 @@ import {
   ReCaptchaEnterpriseProvider,
   initializeAppCheck,
 } from "firebase/app-check";
+import { initializeFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -21,10 +22,22 @@ export const firebaseConfigured = Boolean(
 );
 
 let appCheckStarted = false;
+let firestoreStarted = false;
 
 export function getFirebaseApp(): FirebaseApp | undefined {
   if (!firebaseConfigured) return undefined;
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+
+  // PTracker domain objects intentionally use optional fields. Firestore rejects
+  // JavaScript `undefined` values by default, which can make otherwise valid
+  // saves fail (for example when an invoice lock is removed). Configure the
+  // client once so optional properties are omitted rather than rejecting the
+  // entire write.
+  if (!firestoreStarted) {
+    initializeFirestore(app, { ignoreUndefinedProperties: true });
+    firestoreStarted = true;
+  }
+
   const siteKey = process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY;
   if (
     typeof window !== "undefined" &&
